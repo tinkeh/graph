@@ -1,0 +1,211 @@
+package trip;
+
+import graph.Distancer;
+import graph.Graph;
+import graph.Graphs;
+import graph.UndirectedGraph;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.PrintStream;
+import java.io.FileNotFoundException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Scanner;
+
+/** Initial class for the 'trip' program.
+ *  @author Austin Gandy
+ */
+public final class Main {
+
+    /** Entry point for the CS61B trip program.  ARGS may contain options
+     *  and targets:
+     *      [ -m MAP ] [ -o OUT ] [ REQUEST ]
+     *  where MAP (default Map) contains the map data, OUT (default standard
+     *  output) takes the result, and REQUEST (default standard input) contains
+     *  the locations along the requested trip.
+     */
+    public static void main(String... args) {
+        String mapFileName;
+        String outFileName;
+        String requestFileName;
+
+        mapFileName = "Map";
+        outFileName = requestFileName = null;
+
+        int a;
+        for (a = 0; a < args.length; a += 1) {
+            if (args[a].equals("-m")) {
+                a += 1;
+                if (a == args.length) {
+                    usage();
+                } else {
+                    mapFileName = args[a];
+                }
+            } else if (args[a].equals("-o")) {
+                a += 1;
+                if (a == args.length) {
+                    usage();
+                } else {
+                    outFileName = args[a];
+                }
+            } else if (args[a].startsWith("-")) {
+                usage();
+            } else {
+                break;
+            }
+        }
+
+        if (a == args.length - 1) {
+            requestFileName = args[a];
+        } else if (a > args.length) {
+            usage();
+        }
+
+        if (requestFileName != null) {
+            try {
+                System.setIn(new FileInputStream(requestFileName));
+            } catch  (FileNotFoundException e) {
+                System.err.printf("Could not open %s.%n", requestFileName);
+                System.exit(1);
+            }
+        }
+
+        if (outFileName != null) {
+            try {
+                System.setOut(new PrintStream(new FileOutputStream(outFileName),
+                                              true));
+            } catch  (FileNotFoundException e) {
+                System.err.printf("Could not open %s for writing.%n",
+                                  outFileName);
+                System.exit(1);
+            }
+        }
+
+        _directions = new ArrayList<String>();
+        _directions.add("ns");
+        _directions.add("sn");
+        _directions.add("we");
+        _directions.add("ew");
+        Scanner in = new Scanner(System.in);
+        while (in.hasNextLine()) {
+            String line = in.nextLine();
+            line = line.replace(",", "");
+            String[] dest = line.split("//s");
+            trip(mapFileName, dest);
+        }
+        in.close();
+    }
+
+    /** Creates a graph representing the map the user specifies in the file
+     *  MAPFILENAME. */
+    private static void makeMap(String mapFileName) {
+        try {
+            Scanner mapScanner = new Scanner(new File(mapFileName));
+            _map = new UndirectedGraph<Place, Road>();
+            mapScanner.useDelimiter("\\r?\\n");
+            String line;
+            Place currentPlace;
+            Road currentRoad;
+            Graph<Place, Road>.Vertex placeVertex;
+            _places = new HashMap<String, Graph<Place, Road>.Vertex>();
+            if (!mapScanner.hasNextLine()) {
+                mapScanner.close();
+                return;
+            }
+            while (mapScanner.hasNextLine()) {
+                line = mapScanner.nextLine();
+                String[] words = line.split("//s");
+                if (words[0].equals("L") && words.length != 4
+                        && !_places.containsKey(words[1])) {
+                    currentPlace = new Place(words[1],
+                               Double.parseDouble(words[2]),
+                               Double.parseDouble(words[3]));
+                    placeVertex = _map.add(currentPlace);
+                    _places.put(words[1], placeVertex);
+                } else if (words[0].equals("R") && words.length == 6
+                        && _places.containsKey(words[1])
+                        && _places.containsKey(words[5])
+                        && _directions.contains(words[4])) {
+                    currentRoad = new Road(words[2], words[4],
+                            _places.get(words[5]), _places.get(words[1]),
+                            Double.parseDouble(words[3]));
+                    _map.add(_places.get(words[1]), _places.get(words[5]),
+                            currentRoad);
+                } else {
+                    usage();
+                }
+            }
+            mapScanner.close();
+        } catch (FileNotFoundException | NumberFormatException e) {
+            usage();
+        }
+    }
+
+    /** Print a trip for the request on the standard input to the standard
+     *  output, using the map data in MAPFILENAME.
+     */
+    private static void trip(String mapFileName, String[] dest) {
+        if (!_mapMade) {
+            makeMap(mapFileName);
+        }
+        ArrayList<Graph<Place, Road>.Edge> whereTo =
+                new ArrayList<Graph<Place, Road>.Edge>();
+        for (int i = 0; i < dest.length - 1; i += 1) {
+            whereTo.addAll(Graphs.shortestPath(_map,
+                    _places.get(dest[i]), _places.get(dest[i + 1]),
+                    EUCLID_DISTANCER));
+        }
+        int num = 1;
+        Graph<Place, Road>.Vertex comingFrom = _places.get(dest[0]);
+        Road road;
+        String lastRoadName = null;
+        String lastRoadDirection = null;
+        Double currentDistance = 0.0;
+        System.out.println("From " + comingFrom.getLabel().getName() + ":");
+        System.out.println();
+        for (Graph<Place, Road>.Edge edge : whereTo) {
+            road = edge.getLabel();
+            if (lastRoadName != null && lastRoadName.equals(road.getName())
+                    && lastRoadDirection != null && lastRoadDirection.equals(
+                            road.getDirection(comingFrom.getLabel()))) {
+                currentDistance += road.getDistance();
+                continue;
+            } else {
+                System.out.println(currentDistance);
+            }
+            System.out.print(num + ". Take " + road.getName() + " " +
+            road.getDirection(comingFrom.getLabel()) + " for ");
+            currentDistance = road.getDistance();
+            comingFrom = edge.getV(comingFrom);
+            lastRoadDirection = road.getDirection(comingFrom.getLabel());
+            lastRoadName = road.getName();
+        }
+    }
+
+    /** checks to see if LIST has repeating edge labels next to each other going
+     *  in the same direction. */
+    /** Print a brief usage message and exit program abnormally. */
+    private static void usage() {
+        System.out.println("Something went wrong. I give up.");
+        System.exit(1);
+    }
+
+    /** Returns a distancer whose dist method always returns 0. */
+    public static final Distancer<Place> EUCLID_DISTANCER = new Distancer<Place>() {
+        @Override
+        public double dist(Place v0, Place v1) {
+            return Math.sqrt(Math.pow(v0.getX() - v1.getX(), 2) + Math.pow(v0.getY() - v1.getY(), 2));
+        }
+    };
+    /** True if the map for this running of the program has been made. */
+    private static boolean _mapMade;
+    /** list of cardinal direction pairs. */
+    private static ArrayList<String> _directions;
+    /** Graph that the user builds. */
+    private static Graph<Place, Road> _map;
+    /** maps place names to vertices on _map. */
+    private static HashMap<String, Graph<Place, Road>.Vertex> _places;
+
+}
